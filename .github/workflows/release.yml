@@ -57,9 +57,7 @@ jobs:
       - name: Package & upload
         uses: BigWigsMods/packager@v2
         with:
-          # TODO: replace 0 with the PullReview CurseForge project ID once the
-          # project is created (curseforge.com -> Submit Addon).
-          args: -p 0
+          args: -p 1559904
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
