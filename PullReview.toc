@@ -1,0 +1,16 @@
+## Interface: 120005
+## Title: PullReview
+## Notes: Records each pull as a reviewable cast tape — scrub the timeline, jump to the opener or cooldown windows.
+## Author: Druiddeleted
+## Version: 0.0.1
+## SavedVariables: PullReviewDB
+
+src\db.lua
+src\specdata.lua
+src\capture.lua
+src\segments.lua
+src\ui_review.lua
+src\ui_dev.lua
+src\ui_config.lua
+src\commands.lua
+src\core.lua
