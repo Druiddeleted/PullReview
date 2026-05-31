@@ -223,10 +223,24 @@ function Dev:Build()
   self.powLabelEdit = makeEdit(f, 80, function(v) self:Entry().secondaryLabel = (v ~= "" and v) or nil; self:Apply() end)
   self.powLabelEdit:SetPoint("LEFT", plLbl, "RIGHT", 6, 0)
 
-  -- column headers for the cooldown rows
-  local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  -- column headers, positioned to match the editbox columns in makeCDRow exactly
+  -- (same widths + 6px gaps; +5 start offset aligns with the input text inset).
+  local hdr = CreateFrame("Frame", nil, f)
   hdr:SetPoint("TOPLEFT", openLbl, "BOTTOMLEFT", -12, -10)
-  hdr:SetText("spellID(s)      label              pre base  extend(ids)         expect(id:n)   hero")
+  hdr:SetSize(760, 14)
+  local function col(prev, w, text)
+    local fs = hdr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    if prev then fs:SetPoint("LEFT", prev, "RIGHT", 6, 0) else fs:SetPoint("LEFT", 7, 0) end
+    fs:SetWidth(w); fs:SetJustifyH("LEFT"); fs:SetText(text)
+    return fs
+  end
+  local cId = col(nil, 92, "spellID(s)")
+  local cLabel = col(cId, 120, "label")
+  local cPre = col(cLabel, 30, "pre")
+  local cBase = col(cPre, 34, "base")
+  local cExt = col(cBase, 120, "extend(ids)")
+  local cExp = col(cExt, 96, "expect(id:n)")
+  col(cExp, 46, "hero")
   self.hdr = hdr
 
   -- scroll of cooldown rows
