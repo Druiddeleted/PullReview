@@ -202,8 +202,10 @@ function UI:Build()
 
   -- pools
   self.tapePool = {}
+  self.groupPool = {}
   self.castPool = {}
   self.segPool = {}
+  self.collapsed = self.collapsed or {}
 
   self.frame = f
   self.view = { mode = "whole" }
@@ -240,14 +242,36 @@ local function makeTapeRow(parent)
   return b
 end
 
+local function makeGroupRow(parent)
+  local b = CreateFrame("Button", nil, parent)
+  b:SetHeight(22)
+  b.sel = b:CreateTexture(nil, "BACKGROUND"); b.sel:SetAllPoints()
+  b.sel:SetColorTexture(0.9, 0.7, 0.1, 0.25); b.sel:Hide()
+  b.hl = b:CreateTexture(nil, "HIGHLIGHT"); b.hl:SetAllPoints()
+  b.hl:SetColorTexture(1, 1, 1, 0.08)
+  b.toggle = CreateFrame("Button", nil, b)
+  b.toggle:SetSize(16, 16); b.toggle:SetPoint("LEFT", 2, 0)
+  b.toggle.tx = b.toggle:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  b.toggle.tx:SetPoint("CENTER")
+  b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  b.text:SetPoint("LEFT", b.toggle, "RIGHT", 2, 0)
+  b.text:SetPoint("RIGHT", -2, 0); b.text:SetJustifyH("LEFT")
+  b.text:SetWordWrap(false)
+  return b
+end
+
+-- Tree: run groups (collapsible) with their pulls nested, then ungrouped pulls.
 function UI:RefreshTapeList()
   local f = self.frame
   resetPool(self.tapePool)
-  local tapes = ns.DB:Tapes()
+  resetPool(self.groupPool)
+  self.collapsed = self.collapsed or {}
+  local groups, ungrouped = ns.DB:Groups()
   local y = 0
-  for _, tape in ipairs(tapes) do
+
+  local function pullRow(tape, indent)
     local row = acquire(self.tapePool, f.left.child, makeTapeRow)
-    row:SetPoint("TOPLEFT", 0, -y)
+    row:SetPoint("TOPLEFT", indent, -y)
     row:SetPoint("TOPRIGHT", 0, -y)
     local r, g, b = classColor(tape.class)
     row.line1:SetText((tape.label or tape.zone or "Pull") .. (tape.manual and "  |cffffd100(manual)|r" or ""))
@@ -255,20 +279,44 @@ function UI:RefreshTapeList()
     row.line2:SetFormattedText("|cff%02x%02x%02x%s|r · %ds · %d casts",
       r * 255, g * 255, b * 255, specLabel(tape), math.floor(tape.durationSec or 0), #tape.casts)
     row.pin:SetText(tape.pinned and "|cffffd100*|r" or "")
-    row.sel:SetShown(tape.id == self.selectedTapeId)
+    row.sel:SetShown(self.sel and self.sel.kind == "pull" and self.sel.tapeId == tape.id)
     row:SetScript("OnClick", function(_, button)
       if button == "RightButton" then
-        tape.pinned = not tape.pinned
-        UI:RefreshTapeList()
+        tape.pinned = not tape.pinned; UI:RefreshTapeList()
       else
-        UI.selectedTapeId = tape.id
-        UI.view = { mode = "whole" }
-        UI:RefreshAll()
+        UI.sel = { kind = "pull", tapeId = tape.id }
+        UI.view = { mode = "whole" }; UI:RefreshAll()
       end
     end)
     y = y + 36
   end
+
+  for _, grp in ipairs(groups) do
+    local collapsed = self.collapsed[grp.key]
+    local row = acquire(self.groupPool, f.left.child, makeGroupRow)
+    row:SetPoint("TOPLEFT", 0, -y); row:SetPoint("TOPRIGHT", 0, -y)
+    row.toggle.tx:SetText(collapsed and "+" or "-")
+    local total = 0
+    for _, t in ipairs(grp.tapes) do total = total + (t.durationSec or 0) end
+    row.text:SetFormattedText("|cffffd100%s|r  (%d · %ds)", grp.label, #grp.tapes, math.floor(total))
+    row.sel:SetShown(self.sel and self.sel.kind == "run" and self.sel.groupKey == grp.key)
+    row.toggle:SetScript("OnClick", function()
+      UI.collapsed[grp.key] = not UI.collapsed[grp.key]; UI:RefreshTapeList()
+    end)
+    row:SetScript("OnClick", function()
+      UI.sel = { kind = "run", groupKey = grp.key }
+      UI.view = { mode = "runwhole" }; UI:RefreshAll()
+    end)
+    y = y + 24
+    if not collapsed then
+      for _, tape in ipairs(grp.tapes) do pullRow(tape, 16) end
+    end
+  end
+
+  for _, tape in ipairs(ungrouped) do pullRow(tape, 0) end
+
   releaseRest(self.tapePool)
+  releaseRest(self.groupPool)
   f.left.child:SetHeight(math.max(y, 1))
 end
 
@@ -281,22 +329,41 @@ local function makeSegBtn(parent)
 end
 
 function UI:SelectedTape()
-  return self.selectedTapeId and ns.DB:GetTape(self.selectedTapeId)
+  if self.sel and self.sel.kind == "pull" then return ns.DB:GetTape(self.sel.tapeId) end
+  return nil
+end
+
+function UI:SelectedRunTapes()
+  if not (self.sel and self.sel.kind == "run") then return nil end
+  local groups = ns.DB:Groups()
+  for _, g in ipairs(groups) do
+    if g.key == self.sel.groupKey then return g.tapes, g.label end
+  end
+  return nil
 end
 
 function UI:RefreshSegments()
   local f = self.frame
   resetPool(self.segPool)
-  local tape = self:SelectedTape()
-  if not tape then releaseRest(self.segPool); return end
 
   local specs = {}
-  specs[#specs + 1] = { mode = "whole", text = "Whole" }
-  specs[#specs + 1] = { mode = "opener", text = "Opener" }
-  self.tracks = ns.Segments:CooldownTracks(tape)
-  for i, tr in ipairs(self.tracks) do
-    local n = #tr.occurrences
-    specs[#specs + 1] = { mode = "cd", cdIndex = i, text = string.format("%s (%d)", tr.label, n), dim = (n == 0) }
+  if self.sel and self.sel.kind == "run" then
+    local tapes = self:SelectedRunTapes()
+    if not tapes then releaseRest(self.segPool); return end
+    specs[#specs + 1] = { mode = "runwhole", text = "Whole run" }
+    for _, lbl in ipairs(ns.Segments:RunTrackLabels(tapes)) do
+      specs[#specs + 1] = { mode = "runcd", cdLabel = lbl, text = lbl }
+    end
+  else
+    local tape = self:SelectedTape()
+    if not tape then releaseRest(self.segPool); return end
+    specs[#specs + 1] = { mode = "whole", text = "Whole" }
+    specs[#specs + 1] = { mode = "opener", text = "Opener" }
+    self.tracks = ns.Segments:CooldownTracks(tape)
+    for i, tr in ipairs(self.tracks) do
+      local n = #tr.occurrences
+      specs[#specs + 1] = { mode = "cd", cdIndex = i, text = string.format("%s (%d)", tr.label, n), dim = (n == 0) }
+    end
   end
 
   local x = 0
@@ -305,11 +372,13 @@ function UI:RefreshSegments()
     b:SetText(spec.text)
     b:SetWidth(math.max(60, b:GetFontString():GetStringWidth() + 18))
     b:SetPoint("LEFT", x, 0)
-    local active = (self.view.mode == spec.mode and (spec.mode ~= "cd" or self.view.cdIndex == spec.cdIndex))
+    local active = (self.view.mode == spec.mode
+      and (spec.mode ~= "cd" or self.view.cdIndex == spec.cdIndex)
+      and (spec.mode ~= "runcd" or self.view.cdLabel == spec.cdLabel))
     b:SetEnabled(not spec.dim)
     b:GetFontString():SetTextColor(active and 1 or 0.8, active and 0.82 or 0.8, active and 0 or 0.8)
     b:SetScript("OnClick", function()
-      UI.view = { mode = spec.mode, cdIndex = spec.cdIndex, occIndex = 1 }
+      UI.view = { mode = spec.mode, cdIndex = spec.cdIndex, cdLabel = spec.cdLabel, occIndex = 1 }
       UI:RefreshDetail()
       UI:RefreshSegments()
     end)
@@ -375,14 +444,18 @@ function UI:RenderItems(items)
     row:SetHeight(rh)
     row:SetPoint("TOPLEFT", 0, -y)
     row:SetPoint("TOPRIGHT", 0, -y)
-    if item.divider or item.header then
+    if item.divider or item.header or item.segment then
       row.spellID = nil
       row.time:Hide(); row.icon:Hide(); row.name:Hide(); row.gap:Hide(); row.res:Hide()
       row.hdr:SetFont(FONT, sz, "OUTLINE")
       row.hdr:SetText(item.label or item.header)
-      if item.divider then
-        row.hdr:SetTextColor(1, 0.45, 0.45); row.line:Show()
-      else
+      if item.divider then            -- cooldown anchor: red line
+        row.hdr:SetTextColor(1, 0.45, 0.45)
+        row.line:SetColorTexture(1, 0.25, 0.25, 0.95); row.line:Show()
+      elseif item.segment then         -- combat-segment break in a run: yellow line
+        row.hdr:SetTextColor(1, 0.85, 0.3)
+        row.line:SetColorTexture(1, 0.82, 0, 0.9); row.line:Show()
+      else                             -- PRE-PULL / PULL section: text only
         row.hdr:SetTextColor(1, 0.82, 0); row.line:Hide()
       end
       row.hdr:Show()
@@ -443,8 +516,50 @@ local function buildItems(casts, opts)
   return items
 end
 
+function UI:RefreshRunDetail()
+  local f = self.frame
+  local tapes, label = self:SelectedRunTapes()
+  if not tapes then
+    f.empty:Show(); f.summary:SetText(""); f.stepper:Hide()
+    if f.detailTitle then f.detailTitle:SetText("") end
+    self:RenderItems({})
+    return
+  end
+  f.empty:Hide()
+  f.stepper:Hide()
+  if f.detailTitle then f.detailTitle:SetText(label or "Run") end
+  if f.colhdr then
+    local hasRes, resLabel = false, nil
+    for _, t in ipairs(tapes) do
+      resLabel = resLabel or t.resLabel
+      for _, c in ipairs(t.casts) do if c.res ~= nil then hasRes = true; break end end
+      if hasRes then break end
+    end
+    f.colhdr.res:SetText(hasRes and (resLabel or "Resource") or "")
+  end
+
+  if self.view.mode == "runcd" and self.view.cdLabel then
+    local n = 0
+    for _, t in ipairs(tapes) do
+      for _, g in ipairs(ns.Segments:CooldownTracks(t)) do
+        if g.label == self.view.cdLabel then n = n + #g.occurrences end
+      end
+    end
+    f.summary:SetText(string.format("%s — %d window(s) across the run", self.view.cdLabel, n))
+    self:RenderItems(ns.Segments:RunCDItems(tapes, self.view.cdLabel))
+  else
+    local totalCasts = 0
+    for _, t in ipairs(tapes) do totalCasts = totalCasts + #t.casts end
+    f.summary:SetText(string.format("Whole run — %d segments, %d casts  (0s = dungeon entry; yellow = segment breaks)", #tapes, totalCasts))
+    self:RenderItems(ns.Segments:RunItems(tapes))
+  end
+end
+
 function UI:RefreshDetail()
   local f = self.frame
+  if self.sel and self.sel.kind == "run" then
+    return self:RefreshRunDetail()
+  end
   local tape = self:SelectedTape()
   if not tape then
     f.empty:Show(); f.summary:SetText(""); f.stepper:Hide()
@@ -519,9 +634,9 @@ end
 function UI:Show()
   self:Build()
   -- default selection: newest tape
-  if not self.selectedTapeId then
+  if not self.sel then
     local tapes = ns.DB:Tapes()
-    if tapes[1] then self.selectedTapeId = tapes[1].id end
+    if tapes[1] then self.sel = { kind = "pull", tapeId = tapes[1].id } end
   end
   self.frame:Show()
   self:RefreshLayout()
@@ -537,6 +652,6 @@ end
 
 function UI:OpenLatest()
   local tapes = ns.DB:Tapes()
-  if tapes[1] then self.selectedTapeId = tapes[1].id; self.view = { mode = "whole" } end
+  if tapes[1] then self.sel = { kind = "pull", tapeId = tapes[1].id }; self.view = { mode = "whole" } end
   self:Show()
 end

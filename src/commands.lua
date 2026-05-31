@@ -134,7 +134,7 @@ function ns.Commands:Register()
     elseif cmd == "cd" then
       handleCD(rest)
     elseif cmd == "clear" then
-      ns.DB:ClearTapes(); ns.UI.selectedTapeId = nil
+      ns.DB:ClearTapes(); ns.UI.sel = nil
       if ns.UI.RefreshAll then ns.UI:RefreshAll() end
       pr("cleared all stored pulls.")
     elseif cmd == "debug" then

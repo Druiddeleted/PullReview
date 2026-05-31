@@ -21,9 +21,13 @@ end
 
 local function specChoices(classID)
   local out = {}
-  local n = (GetNumSpecializationsForClassID and GetNumSpecializationsForClassID(classID)) or 0
+  if not classID then return out end -- dropdown init can run before a class is picked
+  local getN = (C_SpecializationInfo and C_SpecializationInfo.GetNumSpecializationsForClassID) or GetNumSpecializationsForClassID
+  local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfoForClassID) or GetSpecializationInfoForClassID
+  if not (getN and getInfo) then return out end
+  local n = getN(classID) or 0
   for i = 1, n do
-    local id, name = GetSpecializationInfoForClassID(classID, i)
+    local id, name = getInfo(classID, i)
     if id then out[#out + 1] = { id = id, name = name } end
   end
   return out

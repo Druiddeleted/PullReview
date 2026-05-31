@@ -14,6 +14,17 @@ local live = nil          -- active recording: { casts, pullT, manual, class, sp
 local prepull = {}        -- rolling recent casts (absolute t) for lead-in
 local suppressUntil = 0
 local activeChannelName, channelValidUntil = nil, 0
+local run = nil           -- active dungeon/raid/M+ run: { key, label, startT, mapID }
+
+-- Returns (instanceName, mapID) when in a dungeon/raid/scenario, else nil.
+local function instanceRunContext()
+  local inInstance, itype = IsInInstance()
+  if inInstance and (itype == "party" or itype == "raid" or itype == "scenario") then
+    local name, _, _, _, _, _, _, mapID = GetInstanceInfo()
+    return name or "Instance", mapID
+  end
+  return nil
+end
 
 local function currentSpec()
   local _, class = UnitClass("player")
@@ -208,6 +219,9 @@ function ns.Capture:Stop()
     label = label,
     resLabel = live.resLabel,
     encounterName = live.encounterName,
+    groupKey = run and run.key,
+    groupLabel = run and run.label,
+    runOffset = run and (pullT - run.startT) or nil,
     durationSec = durationSec,
     casts = casts,
   }
@@ -226,6 +240,7 @@ function ns.Capture:Register()
   f:RegisterEvent("PLAYER_REGEN_ENABLED")
   f:RegisterEvent("PLAYER_ENTERING_WORLD")
   f:RegisterEvent("ENCOUNTER_START")
+  f:RegisterEvent("CHALLENGE_MODE_START")
 
   f:SetScript("OnEvent", function(_, event, a1, a2, a3)
     -- a1/a2/a3 are the first three event payload args. For spellcast events
@@ -234,6 +249,24 @@ function ns.Capture:Register()
     local unit, spellID = a1, a3
     if event == "PLAYER_ENTERING_WORLD" then
       suppressUntil = GetTime() + 1.5
+      -- Start/clear an instance run. M+ relabels it via CHALLENGE_MODE_START.
+      local name, mapID = instanceRunContext()
+      if name then
+        if not run or run.mapID ~= mapID then
+          run = { key = ns.DB:NextRunId(), label = name, startT = GetTime(), mapID = mapID }
+        end
+      else
+        run = nil
+      end
+      return
+    elseif event == "CHALLENGE_MODE_START" then
+      -- a1 = challenge map ID. Enrich (or start) the run with the key label.
+      local mapID = a1
+      local mapName = (C_ChallengeMode and C_ChallengeMode.GetMapUIInfo and C_ChallengeMode.GetMapUIInfo(mapID)) or (run and run.label) or "Mythic+"
+      local level = C_ChallengeMode and C_ChallengeMode.GetActiveKeystoneInfo and (C_ChallengeMode.GetActiveKeystoneInfo())
+      if not run then run = { key = ns.DB:NextRunId(), startT = GetTime() } end
+      run.mapID = mapID
+      run.label = mapName .. (level and (" +" .. level) or "")
       return
     elseif event == "ENCOUNTER_START" then
       -- encounterName (a2) is provided by the event, not a unit query, so it's

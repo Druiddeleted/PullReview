@@ -46,6 +46,7 @@ function ns.DB:Init()
   PullReviewDB.tapes = PullReviewDB.tapes or {}
   PullReviewDB.specConfig = PullReviewDB.specConfig or {} -- [class][specID] = {cooldowns=..., openerSec=...}
   PullReviewDB.nextId = PullReviewDB.nextId or 1
+  PullReviewDB.nextRunId = PullReviewDB.nextRunId or 1
   PullReviewDB.debug = PullReviewDB.debug or false
   PullReviewDB.devMode = PullReviewDB.devMode or false
 
@@ -57,6 +58,34 @@ function ns.DB:NextId()
   local id = PullReviewDB.nextId
   PullReviewDB.nextId = id + 1
   return id
+end
+
+function ns.DB:NextRunId()
+  local id = PullReviewDB.nextRunId
+  PullReviewDB.nextRunId = id + 1
+  return "run" .. id
+end
+
+-- Current character's tapes grouped by run (M+/instance). Returns:
+--   groups   = { { key, label, tapes = {newest-first} }, ... }  (newest run first)
+--   ungrouped = { tape, ... }  (open-world pulls, newest-first)
+function ns.DB:Groups()
+  local byKey, order, ungrouped = {}, {}, {}
+  for _, t in ipairs(self:Tapes()) do
+    if t.groupKey then
+      local g = byKey[t.groupKey]
+      if not g then
+        g = { key = t.groupKey, label = t.groupLabel or "Run", tapes = {} }
+        byKey[t.groupKey] = g
+        order[#order + 1] = g
+      end
+      g.tapes[#g.tapes + 1] = t
+      if t.groupLabel and #t.groupLabel > #(g.label or "") then g.label = t.groupLabel end
+    else
+      ungrouped[#ungrouped + 1] = t
+    end
+  end
+  return order, ungrouped
 end
 
 local function charKey()

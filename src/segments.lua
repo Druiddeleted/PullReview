@@ -140,6 +140,63 @@ function ns.Segments:CooldownTracks(tape)
   return order
 end
 
+-- ---- run-level (a whole dungeon/M+ as a group of segments) ------------------
+
+local function sortByOffset(tapes)
+  local s = {}
+  for _, t in ipairs(tapes) do s[#s + 1] = t end
+  table.sort(s, function(a, b) return (a.runOffset or 0) < (b.runOffset or 0) end)
+  return s
+end
+
+-- One continuous timeline for the whole run: casts placed at runOffset + cast.t,
+-- with a "segment" marker before each combat (rendered as a yellow divider).
+function ns.Segments:RunItems(tapes)
+  local items = {}
+  for _, t in ipairs(sortByOffset(tapes)) do
+    items[#items + 1] = { segment = true, label = t.label or "Pull" }
+    local off = t.runOffset or 0
+    local gaps = self:Gaps(t.casts, ns.DB.settings.gapThreshold or 1.6)
+    for i, c in ipairs(t.casts) do
+      items[#items + 1] = { t = off + c.t, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res, gapBefore = gaps[i] }
+    end
+  end
+  return items
+end
+
+-- Distinct cooldown-track labels that actually fired somewhere in the run.
+function ns.Segments:RunTrackLabels(tapes)
+  local seen, order = {}, {}
+  for _, t in ipairs(tapes) do
+    for _, g in ipairs(self:CooldownTracks(t)) do
+      if #g.occurrences > 0 and not seen[g.label] then
+        seen[g.label] = true
+        order[#order + 1] = g.label
+      end
+    end
+  end
+  return order
+end
+
+-- Every occurrence of one cooldown across the whole run, each re-zeroed to its
+-- anchor and separated by a divider naming the segment + occurrence.
+function ns.Segments:RunCDItems(tapes, label)
+  local items = {}
+  for _, t in ipairs(sortByOffset(tapes)) do
+    for _, g in ipairs(self:CooldownTracks(t)) do
+      if g.label == label then
+        for _, w in ipairs(g.occurrences) do
+          items[#items + 1] = { divider = true, label = string.format("%s — %s #%d", t.label or "Pull", label, w.occurrence) }
+          for _, c in ipairs(w.casts) do
+            items[#items + 1] = { t = c.t - w.anchorT, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res }
+          end
+        end
+      end
+    end
+  end
+  return items
+end
+
 -- Gaps longer than the threshold between consecutive casts (dead GCD time).
 -- Returns a set keyed by cast index -> gap seconds (the gap BEFORE that cast).
 function ns.Segments:Gaps(casts, threshold)
