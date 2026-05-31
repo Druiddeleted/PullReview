@@ -224,7 +224,7 @@ end
 
 local function makeTapeRow(parent)
   local b = CreateFrame("Button", nil, parent)
-  b:SetHeight(34)
+  b:SetHeight(46)
   b.sel = b:CreateTexture(nil, "BACKGROUND")
   b.sel:SetAllPoints()
   b.sel:SetColorTexture(0.3, 0.5, 0.9, 0.3)
@@ -232,10 +232,14 @@ local function makeTapeRow(parent)
   b.hl = b:CreateTexture(nil, "HIGHLIGHT")
   b.hl:SetAllPoints()
   b.hl:SetColorTexture(1, 1, 1, 0.08)
-  b.line1 = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  b.line1:SetPoint("TOPLEFT", 4, -3)
-  b.line2 = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  b.line2:SetPoint("TOPLEFT", 4, -17)
+  b.line1 = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")  -- pull label
+  b.line1:SetPoint("TOPLEFT", 4, -3); b.line1:SetPoint("RIGHT", -14, 0)
+  b.line1:SetJustifyH("LEFT"); b.line1:SetWordWrap(false)
+  b.line2 = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall") -- spec · hero
+  b.line2:SetPoint("TOPLEFT", 4, -17); b.line2:SetPoint("RIGHT", -4, 0)
+  b.line2:SetJustifyH("LEFT"); b.line2:SetWordWrap(false)
+  b.line3 = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall") -- duration · casts
+  b.line3:SetPoint("TOPLEFT", 4, -31)
   b.pin = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   b.pin:SetPoint("TOPRIGHT", -4, -3)
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -276,8 +280,8 @@ function UI:RefreshTapeList()
     local r, g, b = classColor(tape.class)
     row.line1:SetText((tape.label or tape.zone or "Pull") .. (tape.manual and "  |cffffd100(manual)|r" or ""))
     row.line1:SetTextColor(1, 1, 1)
-    row.line2:SetFormattedText("|cff%02x%02x%02x%s|r · %ds · %d casts",
-      r * 255, g * 255, b * 255, specLabel(tape), math.floor(tape.durationSec or 0), #tape.casts)
+    row.line2:SetFormattedText("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, specLabel(tape))
+    row.line3:SetFormattedText("%ds · %d casts", math.floor(tape.durationSec or 0), #tape.casts)
     row.pin:SetText(tape.pinned and "|cffffd100*|r" or "")
     row.sel:SetShown(self.sel and self.sel.kind == "pull" and self.sel.tapeId == tape.id)
     row:SetScript("OnClick", function(_, button)
@@ -288,7 +292,7 @@ function UI:RefreshTapeList()
         UI.view = { mode = "whole" }; UI:RefreshAll()
       end
     end)
-    y = y + 36
+    y = y + 48
   end
 
   for _, grp in ipairs(groups) do
@@ -469,7 +473,13 @@ function UI:RenderItems(items)
       row.time:SetText(fmtTime(item.t)); row.time:SetTextColor(0.8, 0.8, 0.8)
       row.icon:SetTexture(item.icon)
       row.name:SetText(item.name or ("spell " .. (item.spellID or "?")))
-      row.name:SetTextColor(item.onGCD and 1 or 0.6, item.onGCD and 1 or 0.85, item.onGCD and 1 or 0.6)
+      if item.buffState == "buffed" then
+        row.name:SetTextColor(0.3, 1, 0.3)        -- buffed consumer
+      elseif item.buffState == "unbuffed" then
+        row.name:SetTextColor(1, 0.3, 0.3)        -- unbuffed consumer (flagged)
+      else
+        row.name:SetTextColor(item.onGCD and 1 or 0.6, item.onGCD and 1 or 0.85, item.onGCD and 1 or 0.6)
+      end
       if item.gapBefore then
         row.gap:SetText(string.format("|cffff6666+%.1fs gap|r", item.gapBefore)); row.gap:Show()
       else
@@ -508,7 +518,7 @@ local function buildItems(casts, opts)
     elseif opts.dividerLabel and not wroteDiv and dt >= 0 then
       items[#items + 1] = { divider = true, label = opts.dividerLabel }; wroteDiv = true
     end
-    items[#items + 1] = { t = dt, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res, gapBefore = gaps[i] }
+    items[#items + 1] = { t = dt, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res, gapBefore = gaps[i], buffState = opts.buffStates and opts.buffStates[c] }
   end
   if opts.dividerLabel and not wroteDiv then
     items[#items + 1] = { divider = true, label = opts.dividerLabel }
@@ -575,16 +585,17 @@ function UI:RefreshDetail()
     f.colhdr.res:SetText(hasRes and (tape.resLabel or "Resource") or "")
   end
 
+  local bs = ns.Segments:ComputeBuffs(tape)
   local mode = self.view.mode
   if mode == "whole" then
     f.stepper:Hide()
     f.summary:SetText(string.format("Whole pull — %d casts, %ds", #tape.casts, math.floor(tape.durationSec or 0)))
-    self:RenderItems(buildItems(tape.casts, { split = true }))
+    self:RenderItems(buildItems(tape.casts, { split = true, buffStates = bs }))
   elseif mode == "opener" then
     f.stepper:Hide()
     local op = ns.Segments:Opener(tape)
     f.summary:SetText(string.format("Opener — first %ds, %d casts", math.floor(op.toT), #op.casts))
-    self:RenderItems(buildItems(op.casts, { split = true }))
+    self:RenderItems(buildItems(op.casts, { split = true, buffStates = bs }))
   elseif mode == "cd" then
     local tr = self.tracks and self.tracks[self.view.cdIndex]
     if not tr or #tr.occurrences == 0 then
@@ -611,6 +622,7 @@ function UI:RefreshDetail()
     self:RenderItems(buildItems(w.casts, {
       zeroT = w.anchorT,
       dividerLabel = string.format("%s  (0s)", tr.label),
+      buffStates = bs,
     }))
   end
 end

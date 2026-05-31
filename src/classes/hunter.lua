@@ -20,6 +20,17 @@ ns.SpecData:Register("HUNTER", {
   -- 253 = Beast Mastery. No readable secondary (Focus is primary/Secret), so the
   -- resource column auto-hides for these tapes.
   [253] = {
+    -- Cobra Shot / Barbed Shot / Black Arrow each set the (single) "next Kill
+    -- Command" buff; Kill Command consumes it. Unbuffed KC is a mistake, so flag
+    -- it red. (Black Arrow only exists on Dark Ranger; harmless otherwise.)
+    buffs = {
+      {
+        label = "Kill Command",
+        grantedBy = { 193455, 217200, 466930 }, -- Cobra Shot, Barbed Shot, Black Arrow
+        consumedBy = { 34026 },                  -- Kill Command
+        maxStacks = 1, stacksPerGrant = 1, flagUnbuffed = true,
+      },
+    },
     cooldowns = {
       -- Wailing Arrow: 1 allowed cast inside Bestial Wrath, lost if the 15s
       -- expires first — flagged by the expect check.

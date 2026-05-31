@@ -23,6 +23,14 @@ local _, ns = ...
 --   secondaryPower = Enum.PowerType.X   resource-column source (label derives automatically)
 --   secondaryLabel = string             override the derived resource label
 --   openerSec      = number             per-spec opener length override
+--   buffs          = { <buff>, ... }    inferred buff-relationship highlighting (below)
+-- ===================== BUFF (cast-order inferred) =====================
+--   grantedBy      = {ids}    casts that add a (shared, capped) charge
+--   consumedBy     = {ids}    casts that spend a charge — coloured green if one was available
+--   maxStacks      = number   charge cap (1 = binary; e.g. 2 for "buffs next 2 casts")
+--   stacksPerGrant = number   charges added per granter cast (default 1)
+--   duration       = number   seconds the charge lasts; nil = whole combat segment
+--   flagUnbuffed   = bool      colour unbuffed consumers red (off for long-CD-only buffs)
 -- =====================================================================
 
 ns.SpecData = { defaults = {}, globals = {} }

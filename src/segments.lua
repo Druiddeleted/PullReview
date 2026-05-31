@@ -140,6 +140,44 @@ function ns.Segments:CooldownTracks(tape)
   return order
 end
 
+-- Buff-relationship pass. Buffs are Secret in combat, so we RECONSTRUCT them
+-- from cast order: granter casts add a (shared, capped) charge; consumer casts
+-- spend one. Returns a table keyed by the cast TABLE -> "buffed" | "unbuffed"
+-- ("unbuffed" only recorded when the buff has flagUnbuffed). "buffed" wins if a
+-- cast is a consumer of multiple buffs.
+function ns.Segments:ComputeBuffs(tape)
+  local states = {}
+  local buffs = ns.DB:GetBuffs(tape.class, tape.specID)
+  if not buffs or #buffs == 0 then return states end
+  for _, b in ipairs(buffs) do
+    local grant, consume = {}, {}
+    for _, id in ipairs(b.grantedBy or {}) do grant[id] = true end
+    for _, id in ipairs(b.consumedBy or {}) do consume[id] = true end
+    local maxStacks = b.maxStacks or 1
+    local per = b.stacksPerGrant or 1
+    local stacks, lastGrantT = 0, nil
+    for _, c in ipairs(tape.casts) do
+      if b.duration and stacks > 0 and lastGrantT and (c.t - lastGrantT) > b.duration then
+        stacks = 0 -- expired
+      end
+      -- consume before grant so a spell that's both doesn't buff itself
+      if consume[c.spellID] then
+        if stacks > 0 then
+          stacks = stacks - 1
+          states[c] = "buffed"
+        elseif b.flagUnbuffed and states[c] ~= "buffed" then
+          states[c] = "unbuffed"
+        end
+      end
+      if grant[c.spellID] then
+        stacks = math.min(maxStacks, stacks + per)
+        lastGrantT = c.t
+      end
+    end
+  end
+  return states
+end
+
 -- ---- run-level (a whole dungeon/M+ as a group of segments) ------------------
 
 local function sortByOffset(tapes)
@@ -157,8 +195,9 @@ function ns.Segments:RunItems(tapes)
     items[#items + 1] = { segment = true, label = t.label or "Pull" }
     local off = t.runOffset or 0
     local gaps = self:Gaps(t.casts, ns.DB.settings.gapThreshold or 1.6)
+    local bs = self:ComputeBuffs(t)
     for i, c in ipairs(t.casts) do
-      items[#items + 1] = { t = off + c.t, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res, gapBefore = gaps[i] }
+      items[#items + 1] = { t = off + c.t, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res, gapBefore = gaps[i], buffState = bs[c] }
     end
   end
   return items
@@ -183,12 +222,13 @@ end
 function ns.Segments:RunCDItems(tapes, label)
   local items = {}
   for _, t in ipairs(sortByOffset(tapes)) do
+    local bs = self:ComputeBuffs(t)
     for _, g in ipairs(self:CooldownTracks(t)) do
       if g.label == label then
         for _, w in ipairs(g.occurrences) do
           items[#items + 1] = { divider = true, label = string.format("%s — %s #%d", t.label or "Pull", label, w.occurrence) }
           for _, c in ipairs(w.casts) do
-            items[#items + 1] = { t = c.t - w.anchorT, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res }
+            items[#items + 1] = { t = c.t - w.anchorT, icon = c.icon, name = c.name, spellID = c.spellID, onGCD = c.onGCD, res = c.res, buffState = bs[c] }
           end
         end
       end

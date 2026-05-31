@@ -176,6 +176,7 @@ function ns.DB:EnsureSpecOverride(class, specID)
     -- one into the dev editor.
     entry = {
       cooldowns = def and deepcopy(def.cooldowns) or {},
+      buffs = def and def.buffs and deepcopy(def.buffs) or nil,
       secondaryPower = def and def.secondaryPower,
       secondaryLabel = def and def.secondaryLabel,
     }
@@ -216,4 +217,12 @@ function ns.DB:GetSecondaryLabel(class, specID)
   local def = ns.SpecData:Get(class, specID)
   if def and def.secondaryLabel then return def.secondaryLabel end
   return powerLabel(self:GetSecondaryPower(class, specID)) or "Resource"
+end
+
+-- Buff-relationship definitions (inferred from cast order). Override or default.
+function ns.DB:GetBuffs(class, specID)
+  local u = override(class, specID)
+  if u and u.buffs then return u.buffs end
+  local def = ns.SpecData:Get(class, specID)
+  return (def and def.buffs) or {}
 end
