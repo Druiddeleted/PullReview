@@ -44,6 +44,19 @@ local function currentClassSpec()
   return file, classID, specID
 end
 
+local function currentHero()
+  local id
+  if C_ClassTalents and C_ClassTalents.GetActiveHeroTalentSpec then
+    local ok, v = pcall(C_ClassTalents.GetActiveHeroTalentSpec); if ok then id = v end
+  end
+  local name
+  if id and C_Traits and C_ClassTalents and C_ClassTalents.GetActiveConfigID then
+    local cfg = C_ClassTalents.GetActiveConfigID()
+    if cfg then local ok, info = pcall(C_Traits.GetSubTreeInfo, cfg, id); if ok and info then name = info.name end end
+  end
+  return id, name
+end
+
 -- ---- csv parse/format helpers ------------------------------------------------
 
 local function parseIDList(str)
@@ -80,10 +93,14 @@ local function serialize(classFile, specID, entry)
   if entry.openerSec then w(string.format("    openerSec = %d,", entry.openerSec)) end
   w("    cooldowns = {")
   for _, cd in ipairs(entry.cooldowns or {}) do
-    local parts = { string.format("spellID = %d", cd.spellID or 0), string.format("label = %q", cd.label or "") }
+    local idpart
+    if cd.spellIDs and #cd.spellIDs > 0 then idpart = string.format("spellIDs = {%s}", fmtIDList(cd.spellIDs))
+    else idpart = string.format("spellID = %d", cd.spellID or 0) end
+    local parts = { idpart, string.format("label = %q", cd.label or "") }
     if cd.preCasts then parts[#parts + 1] = "preCasts = " .. cd.preCasts end
     if cd.preSec then parts[#parts + 1] = "preSec = " .. cd.preSec end
     if cd.baseSec then parts[#parts + 1] = "baseSec = " .. cd.baseSec end
+    if cd.heroSpec then parts[#parts + 1] = "heroSpec = " .. cd.heroSpec end
     local extra = ""
     if cd.extend and cd.extend.spells and #cd.extend.spells > 0 then
       extra = extra .. string.format(", extend = { spells = {%s}, perCast = %s }", fmtIDList(cd.extend.spells), tostring(cd.extend.perCast or 1))
@@ -133,7 +150,7 @@ end
 function Dev:Build()
   if self.frame then return end
   local f = CreateFrame("Frame", "PullReviewDevFrame", UIParent, "BackdropTemplate")
-  f:SetSize(720, 460)
+  f:SetSize(800, 470)
   f:SetPoint("CENTER")
   f:SetFrameStrata("FULLSCREEN_DIALOG") -- above the Settings panel it's launched from
   f:SetToplevel(true)
@@ -154,17 +171,23 @@ function Dev:Build()
   close:SetPoint("TOPRIGHT", 2, 2)
   close:SetScript("OnClick", function() f:Hide() end)
 
-  -- class + spec pickers
-  self.classDD = dropdown(f, 130,
+  -- class + spec pickers ("Global (all specs)" edits the lust/potion window set)
+  self.classDD = dropdown(f, 150,
     function()
-      local items = {}
+      local items = { { text = "Global (all specs)", value = { file = "GLOBAL", id = 0, name = "Global (all specs)" } } }
       for _, c in ipairs(classChoices()) do items[#items + 1] = { text = c.name, value = c } end
       return items
     end,
     function() return self.selClassName or "Class" end,
-    function(c) self.selClass = c.file; self.selClassID = c.id; self.selClassName = c.name
-      local specs = specChoices(c.id); self.selSpec = specs[1] and specs[1].id; self.selSpecName = specs[1] and specs[1].name
-      self:Load() end)
+    function(c)
+      self.selClass = c.file; self.selClassID = c.id; self.selClassName = c.name
+      if c.file == "GLOBAL" then
+        self.selSpec = 0; self.selSpecName = "(all specs)"
+      else
+        local specs = specChoices(c.id); self.selSpec = specs[1] and specs[1].id; self.selSpecName = specs[1] and specs[1].name
+      end
+      self:Load()
+    end)
   self.classDD:SetPoint("TOPLEFT", 4, -32)
 
   self.specDD = dropdown(f, 150,
@@ -176,6 +199,9 @@ function Dev:Build()
     function() return self.selSpecName or "Spec" end,
     function(s) self.selSpec = s.id; self.selSpecName = s.name; self:Load() end)
   self.specDD:SetPoint("LEFT", self.classDD, "RIGHT", 4, 0)
+
+  self.heroInfo = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  self.heroInfo:SetPoint("LEFT", self.specDD, "RIGHT", 12, 0)
 
   -- spec-level fields
   local function specLabelFS(text, anchor, dx)
@@ -196,7 +222,7 @@ function Dev:Build()
   -- column headers for the cooldown rows
   local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   hdr:SetPoint("TOPLEFT", openLbl, "BOTTOMLEFT", -12, -10)
-  hdr:SetText("spellID        label                    pre  base  extend(ids)            expect(id:n)")
+  hdr:SetText("spellID(s)      label              pre base  extend(ids)         expect(id:n)   hero")
   self.hdr = hdr
 
   -- scroll of cooldown rows
@@ -239,15 +265,16 @@ end
 
 local function makeCDRow(parent)
   local row = CreateFrame("Frame", nil, parent)
-  row:SetSize(660, 24)
-  row.id = makeEdit(row, 60, function() end); row.id:SetPoint("LEFT", 2, 0)
-  row.label = makeEdit(row, 130, function() end); row.label:SetPoint("LEFT", row.id, "RIGHT", 6, 0)
+  row:SetSize(760, 24)
+  row.id = makeEdit(row, 92, function() end); row.id:SetPoint("LEFT", 2, 0)
+  row.label = makeEdit(row, 120, function() end); row.label:SetPoint("LEFT", row.id, "RIGHT", 6, 0)
   row.pre = makeEdit(row, 30, function() end); row.pre:SetPoint("LEFT", row.label, "RIGHT", 6, 0)
   row.base = makeEdit(row, 34, function() end); row.base:SetPoint("LEFT", row.pre, "RIGHT", 6, 0)
-  row.extend = makeEdit(row, 130, function() end); row.extend:SetPoint("LEFT", row.base, "RIGHT", 6, 0)
-  row.expect = makeEdit(row, 100, function() end); row.expect:SetPoint("LEFT", row.extend, "RIGHT", 6, 0)
+  row.extend = makeEdit(row, 120, function() end); row.extend:SetPoint("LEFT", row.base, "RIGHT", 6, 0)
+  row.expect = makeEdit(row, 96, function() end); row.expect:SetPoint("LEFT", row.extend, "RIGHT", 6, 0)
+  row.hero = makeEdit(row, 46, function() end); row.hero:SetPoint("LEFT", row.expect, "RIGHT", 6, 0)
   row.del = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-  row.del:SetSize(22, 18); row.del:SetText("X"); row.del:SetPoint("LEFT", row.expect, "RIGHT", 6, 0)
+  row.del:SetSize(22, 18); row.del:SetText("X"); row.del:SetPoint("LEFT", row.hero, "RIGHT", 6, 0)
   return row
 end
 
@@ -255,6 +282,8 @@ function Dev:Refresh()
   local f = self.frame
   if not f then return end
   self.classDD.refresh(); self.specDD.refresh()
+  local hid, hname = currentHero()
+  self.heroInfo:SetText(hid and ("active hero: " .. (hname or "?") .. " (" .. hid .. ")") or "no hero spec")
   local entry = self:Entry()
   self.openEdit:SetText(tostring(entry.openerSec or ""))
   self.powEdit:SetText(tostring(entry.secondaryPower or ""))
@@ -269,15 +298,25 @@ function Dev:Refresh()
     local row = pool[pool.n]
     if not row then row = makeCDRow(self.scroll.child); pool[pool.n] = row end
     row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, -y); row:Show()
-    row.id:SetText(tostring(cd.spellID or 0))
+    row.id:SetText(cd.spellID and tostring(cd.spellID) or fmtIDList(cd.spellIDs))
     row.label:SetText(cd.label or "")
     row.pre:SetText(tostring(cd.preCasts or cd.preSec or ""))
     row.base:SetText(tostring(cd.baseSec or 0))
     row.extend:SetText(cd.extend and fmtIDList(cd.extend.spells) or "")
     row.expect:SetText(fmtExpect(cd.expect))
-    -- commit handlers capture this cd
-    row.id:SetScript("OnEnterPressed", function(s) cd.spellID = tonumber(s:GetText()) or cd.spellID; s:ClearFocus(); Dev:Apply() end)
-    row.id:SetScript("OnEditFocusLost", function(s) cd.spellID = tonumber(s:GetText()) or cd.spellID; Dev:Apply() end)
+    row.hero:SetText(tostring(cd.heroSpec or ""))
+    -- commit handlers capture this cd. The id field accepts one ID (single
+    -- anchor) or a comma list (multi-anchor, e.g. all lust variants).
+    local function commitID(s)
+      local ids = parseIDList(s:GetText())
+      if #ids > 1 then cd.spellIDs = ids; cd.spellID = nil
+      elseif #ids == 1 then cd.spellID = ids[1]; cd.spellIDs = nil
+      else cd.spellID, cd.spellIDs = nil, nil end
+      Dev:Apply()
+    end
+    row.id:SetScript("OnEnterPressed", function(s) commitID(s); s:ClearFocus() end)
+    row.id:SetScript("OnEditFocusLost", commitID)
+    row.hero:SetScript("OnEditFocusLost", function(s) cd.heroSpec = tonumber(s:GetText()); Dev:Apply() end)
     row.label:SetScript("OnEditFocusLost", function(s) cd.label = s:GetText(); Dev:Apply() end)
     row.pre:SetScript("OnEditFocusLost", function(s) cd.preCasts = tonumber(s:GetText()); Dev:Apply() end)
     row.base:SetScript("OnEditFocusLost", function(s) cd.baseSec = tonumber(s:GetText()) or 0; Dev:Apply() end)

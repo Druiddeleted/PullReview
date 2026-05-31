@@ -21,11 +21,16 @@ local function fmtTime(t)
 end
 
 local function specLabel(tape)
+  local base
   if tape.specID and GetSpecializationInfoByID then
     local _, name = GetSpecializationInfoByID(tape.specID)
-    if name and name ~= "" then return name end
+    if name and name ~= "" then base = name end
   end
-  return tape.class or "?"
+  base = base or tape.class or "?"
+  if tape.heroSpecName and tape.heroSpecName ~= "" then
+    base = base .. " · " .. tape.heroSpecName
+  end
+  return base
 end
 
 local function classColor(class)
@@ -131,10 +136,19 @@ function UI:Build()
 
   -- right: segment bar + summary + cast log
   local segBar = CreateFrame("Frame", nil, f)
-  segBar:SetPoint("TOPLEFT", left, "TOPRIGHT", 18, 0)
-  segBar:SetPoint("TOPRIGHT", -28, -50)
+  -- +34 clears the left list's scrollbar, which overflows past the list's right edge.
+  segBar:SetPoint("TOPLEFT", left, "TOPRIGHT", 34, -18)
+  segBar:SetPoint("TOPRIGHT", -28, -68)
   segBar:SetHeight(24)
   f.segBar = segBar
+
+  -- pull name above the detail pane (helps with long dungeon-pull labels)
+  local detailTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  detailTitle:SetPoint("BOTTOMLEFT", segBar, "TOPLEFT", 0, 3)
+  detailTitle:SetPoint("RIGHT", segBar, "RIGHT", 0, 0)
+  detailTitle:SetJustifyH("LEFT")
+  detailTitle:SetWordWrap(false)
+  f.detailTitle = detailTitle
 
   local stepper = CreateFrame("Frame", nil, f)
   stepper:SetPoint("TOPLEFT", segBar, "BOTTOMLEFT", 0, -4)
@@ -424,11 +438,17 @@ function UI:RefreshDetail()
   local tape = self:SelectedTape()
   if not tape then
     f.empty:Show(); f.summary:SetText(""); f.stepper:Hide()
+    if f.detailTitle then f.detailTitle:SetText("") end
     self:RenderItems({})
     return
   end
   f.empty:Hide()
-  if f.colhdr then f.colhdr.res:SetText(tape.resLabel or "Res") end
+  if f.detailTitle then f.detailTitle:SetText(tape.label or "Pull") end
+  if f.colhdr then
+    local hasRes = false
+    for _, c in ipairs(tape.casts) do if c.res ~= nil then hasRes = true; break end end
+    f.colhdr.res:SetText(hasRes and (tape.resLabel or "Resource") or "")
+  end
 
   local mode = self.view.mode
   if mode == "whole" then

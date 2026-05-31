@@ -32,6 +32,12 @@ local function inList(list, spellID)
   return false
 end
 
+-- A cooldown's anchor matches a cast by its single spellID or its spellIDs list
+-- (multi-anchor, e.g. all the lust variants -> one "Lust" window).
+local function anchorMatches(cd, spellID)
+  return (cd.spellID and cd.spellID == spellID) or inList(cd.spellIDs, spellID)
+end
+
 -- Compute a single cooldown window anchored at casts[anchorIdx].
 local function buildWindow(casts, anchorIdx, cd, occurrence)
   local anchor = casts[anchorIdx]
@@ -96,21 +102,42 @@ end
 -- Groups with zero occurrences are included (so the reviewer can surface "you
 -- never pressed X this pull").
 function ns.Segments:CooldownTracks(tape)
-  local cds = ns.DB:GetCooldowns(tape.class, tape.specID)
   local casts = tape.casts
-  local groups = {}
+
+  -- per-spec cooldowns, filtered by the tape's hero spec, then global windows
+  -- (lust/potion) which apply to every spec.
+  local cds = {}
+  for _, cd in ipairs(ns.DB:GetCooldowns(tape.class, tape.specID)) do
+    if cd.heroSpec == nil or cd.heroSpec == tape.heroSpec then
+      cds[#cds + 1] = cd
+    end
+  end
+  for _, cd in ipairs(ns.DB:GetCooldowns("GLOBAL", 0)) do
+    cds[#cds + 1] = cd
+  end
+
+  -- Group entries by label so multiple entries (e.g. several potions, each with
+  -- its own pre/post window) merge into one time-ordered track that greys out
+  -- when unused. One "Potion" track, one "Lust" track, etc.
+  local byLabel, order = {}, {}
   for _, cd in ipairs(cds) do
-    local group = { label = cd.label, spellID = cd.spellID, occurrences = {} }
-    local occ = 0
+    local g = byLabel[cd.label]
+    if not g then
+      g = { label = cd.label, spellID = cd.spellID or (cd.spellIDs and cd.spellIDs[1]), occurrences = {} }
+      byLabel[cd.label] = g
+      order[#order + 1] = g
+    end
     for idx, c in ipairs(casts) do
-      if c.spellID == cd.spellID then
-        occ = occ + 1
-        group.occurrences[#group.occurrences + 1] = buildWindow(casts, idx, cd, occ)
+      if anchorMatches(cd, c.spellID) then
+        g.occurrences[#g.occurrences + 1] = buildWindow(casts, idx, cd, 0)
       end
     end
-    groups[#groups + 1] = group
   end
-  return groups
+  for _, g in ipairs(order) do
+    table.sort(g.occurrences, function(a, b) return a.anchorT < b.anchorT end)
+    for i, w in ipairs(g.occurrences) do w.occurrence = i end
+  end
+  return order
 end
 
 -- Gaps longer than the threshold between consecutive casts (dead GCD time).

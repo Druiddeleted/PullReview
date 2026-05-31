@@ -10,12 +10,6 @@ local _, ns = ...
 
 ns.Capture = {}
 
--- Off-GCD in DBC but visually primary inputs (skyriding), same as CastHistory.
-local FORCE_ON_GCD = {
-  [372610] = true, [361584] = true, [361585] = true,
-  [368896] = true, [374990] = true, [425951] = true,
-}
-
 local live = nil          -- active recording: { casts, pullT, manual, class, specID, ... }
 local prepull = {}        -- rolling recent casts (absolute t) for lead-in
 local suppressUntil = 0
@@ -31,6 +25,25 @@ local function currentSpec()
     end
   end
   return class, specID
+end
+
+-- Active hero talent spec (subTreeID + name). Readable out of combat; can't be
+-- changed in combat. Cooldown windows can be filtered by this.
+local function currentHeroSpec()
+  local id
+  if C_ClassTalents and C_ClassTalents.GetActiveHeroTalentSpec then
+    local ok, v = pcall(C_ClassTalents.GetActiveHeroTalentSpec)
+    if ok then id = v end
+  end
+  local name
+  if id and C_Traits and C_Traits.GetSubTreeInfo and C_ClassTalents and C_ClassTalents.GetActiveConfigID then
+    local cfg = C_ClassTalents.GetActiveConfigID()
+    if cfg then
+      local ok, info = pcall(C_Traits.GetSubTreeInfo, cfg, id)
+      if ok and info then name = info.name end
+    end
+  end
+  return id, name
 end
 
 -- Read a secondary resource WITHOUT ever doing forbidden math on a Secret: the
@@ -80,7 +93,7 @@ end
 
 local function classify(spellID, info)
   local _, gcdMS = GetSpellBaseCooldown(spellID)
-  return (gcdMS or 0) > 0 or (info.castTime or 0) > 0 or FORCE_ON_GCD[spellID] == true
+  return (gcdMS or 0) > 0 or (info.castTime or 0) > 0 or ns.Const.FORCE_ON_GCD[spellID] == true
 end
 
 local function trimPrepull(now)
@@ -135,6 +148,7 @@ function ns.Capture:IsManual() return live ~= nil and live.manual end
 function ns.Capture:StartPull(manual)
   if live then return end
   local class, specID = currentSpec()
+  local heroSpec, heroSpecName = currentHeroSpec()
   local pullT = GetTime()
   live = {
     casts = {},
@@ -142,6 +156,8 @@ function ns.Capture:StartPull(manual)
     manual = manual or false,
     class = class,
     specID = specID,
+    heroSpec = heroSpec,
+    heroSpecName = heroSpecName,
     secondaryPower = ns.DB:GetSecondaryPower(class, specID),
     resLabel = ns.DB:GetSecondaryLabel(class, specID),
     zone = (GetSubZoneText and GetSubZoneText() ~= "" and GetSubZoneText()) or (GetZoneText and GetZoneText()) or "",
@@ -184,6 +200,8 @@ function ns.Capture:Stop()
     char = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?"),
     class = live.class,
     specID = live.specID,
+    heroSpec = live.heroSpec,
+    heroSpecName = live.heroSpecName,
     manual = live.manual,
     startedReal = date("%Y-%m-%d %H:%M"),
     zone = live.zone,

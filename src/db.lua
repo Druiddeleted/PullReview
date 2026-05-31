@@ -30,6 +30,13 @@ local function deepcopy(v)
 end
 ns.deepcopy = deepcopy
 
+-- Localized label for a power type (table in constants.lua), so the resource
+-- column names itself per spec (Runes, Combo Points, …) instead of a generic header.
+local function powerLabel(pt)
+  if pt == nil then return nil end
+  return ns.Const.POWER_LABEL[pt]
+end
+
 function ns.DB:Init()
   PullReviewDB = PullReviewDB or {}
   PullReviewDB.settings = PullReviewDB.settings or {}
@@ -52,9 +59,19 @@ function ns.DB:NextId()
   return id
 end
 
--- Newest first.
+local function charKey()
+  return (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+end
+
+-- Newest first, scoped to the logged-in character (tapes are stored account-wide
+-- but each is tagged with its character).
 function ns.DB:Tapes()
-  return PullReviewDB.tapes
+  local key = charKey()
+  local out = {}
+  for _, t in ipairs(PullReviewDB.tapes) do
+    if t.char == key then out[#out + 1] = t end
+  end
+  return out
 end
 
 function ns.DB:GetTape(id)
@@ -70,23 +87,20 @@ function ns.DB:AddTape(tape)
   return tape
 end
 
+-- Prune per-character: cap each character's unpinned tapes independently.
 function ns.DB:Prune()
+  local key = charKey()
   local tapes = PullReviewDB.tapes
   local max = self.settings.maxTapes
-  -- Walk newest->oldest counting unpinned; remove unpinned beyond the cap.
   local kept = 0
   local i = 1
   while i <= #tapes do
     local t = tapes[i]
-    if t.pinned then
+    if t.char ~= key or t.pinned then
       i = i + 1
     else
       kept = kept + 1
-      if kept > max then
-        table.remove(tapes, i)
-      else
-        i = i + 1
-      end
+      if kept > max then table.remove(tapes, i) else i = i + 1 end
     end
   end
 end
@@ -97,8 +111,13 @@ function ns.DB:DeleteTape(id)
   end
 end
 
+-- Clears only the logged-in character's tapes.
 function ns.DB:ClearTapes()
-  wipe(PullReviewDB.tapes)
+  local key = charKey()
+  local tapes = PullReviewDB.tapes
+  for i = #tapes, 1, -1 do
+    if tapes[i].char == key then table.remove(tapes, i) end
+  end
 end
 
 -- --- per-spec cooldown config (defaults from SpecData, overridable here) ------
@@ -161,9 +180,11 @@ function ns.DB:GetSecondaryPower(class, specID)
   return def and def.secondaryPower
 end
 
+-- Precedence: explicit label override > derived from the spec's power type > generic.
 function ns.DB:GetSecondaryLabel(class, specID)
   local u = override(class, specID)
   if u and u.secondaryLabel then return u.secondaryLabel end
   local def = ns.SpecData:Get(class, specID)
-  return (def and def.secondaryLabel) or "Res"
+  if def and def.secondaryLabel then return def.secondaryLabel end
+  return powerLabel(self:GetSecondaryPower(class, specID)) or "Resource"
 end

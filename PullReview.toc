@@ -5,6 +5,7 @@
 ## Version: 0.0.1
 ## SavedVariables: PullReviewDB
 
+src\constants.lua
 src\db.lua
 src\specdata.lua
 src\capture.lua

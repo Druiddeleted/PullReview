@@ -30,8 +30,7 @@ local defaults = {
   DEATHKNIGHT = {
     -- 252 = Unholy
     [252] = {
-      secondaryPower = PT.Runes,   -- ready-rune count (readable); Runic Power is primary/secret
-      secondaryLabel = "Runes",
+      secondaryPower = PT.Runes,   -- ready-rune count (readable); label derives to "Runes"
       cooldowns = {
         {
           spellID = 1233448, label = "Dark Transformation", -- verified from tape
@@ -56,21 +55,45 @@ local defaults = {
     },
   },
 
-  -- Example schema reference (not active unless a HUNTER/253 tape is recorded).
-  -- Shows the `expect` "did you cast it?" check — BM's single allowed cast inside
-  -- Bestial Wrath, lost if the 15s expires first. Fill in the real IDs from a tape.
-  -- HUNTER = {
-  --   [253] = {
-  --     secondaryPower = nil,
-  --     cooldowns = {
-  --       { spellID = 19574, label = "Bestial Wrath", preCasts = 1, baseSec = 15,
-  --         expect = { { spellID = 0 --[[Wind Arrow id]], count = 1, label = "Wind Arrow" } } },
-  --     },
-  --   },
-  -- },
+  HUNTER = {
+    -- 253 = Beast Mastery. No readable secondary resource (Focus is primary/Secret),
+    -- so the resource column auto-hides for these tapes.
+    [253] = {
+      cooldowns = {
+        -- Bestial Wrath is core to both BM hero specs, so it's left untagged.
+        -- To flag "must cast X inside BW (lost if the 15s expires)", add an
+        -- expect entry via /pr dev, e.g. expect = { { spellID = <id>, count = 1 } }.
+        { spellID = 19574, label = "Bestial Wrath", preCasts = 1, baseSec = 15 },
+        -- Add Call of the Wild here (or via /pr dev) once you confirm its ID.
+        -- Dark Ranger windows (Black Arrow 466930, Wailing Arrow 392060) can be
+        -- added with heroSpec set so they only show on Dark Ranger tapes.
+      },
+    },
+  },
+}
+
+-- Global windows apply to EVERY spec (merged on top of per-spec cooldowns).
+-- Lust is a BUFF (Secret in combat) so it can only be anchored on a CAST of a
+-- lust spell — works for self-provided lust + Drums + potions. Teammate-provided
+-- lust is undetectable unless friendly spellcasts prove readable (untested).
+-- Multi-anchor: `spellIDs` means any of these casts opens the window.
+ns.SpecData.globals = {
+  {
+    label = "Lust", preCasts = 0, baseSec = 40,
+    spellIDs = ns.Const.LUST_SPELLS,
+  },
+  {
+    -- Potions: add the current DPS potion's effect spellID via the dev editor
+    -- (it changes per expansion). Anchors on your own potion use.
+    label = "Potion", preCasts = 0, baseSec = 30,
+    spellIDs = {},
+  },
 }
 
 function ns.SpecData:Get(class, specID)
+  if class == "GLOBAL" then
+    return { cooldowns = self.globals }
+  end
   local c = defaults[class]
   return c and c[specID]
 end
