@@ -6,8 +6,11 @@
 ## SavedVariables: PullReviewDB
 
 src\constants.lua
-src\db.lua
 src\specdata.lua
+src\classes\global.lua
+src\classes\deathknight.lua
+src\classes\hunter.lua
+src\db.lua
 src\capture.lua
 src\segments.lua
 src\ui_review.lua

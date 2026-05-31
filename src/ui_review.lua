@@ -332,6 +332,14 @@ end
 
 local function makeCastRow(parent)
   local row = CreateFrame("Frame", nil, parent)
+  row:EnableMouse(true)
+  row:SetScript("OnEnter", function(self)
+    if not self.spellID then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetSpellByID(self.spellID)
+    GameTooltip:Show()
+  end)
+  row:SetScript("OnLeave", GameTooltip_Hide)
   row.time = row:CreateFontString(nil, "OVERLAY")
   row.time:SetPoint("LEFT", 2, 0); row.time:SetWidth(78); row.time:SetJustifyH("RIGHT")
   row.icon = row:CreateTexture(nil, "ARTWORK")
@@ -368,6 +376,7 @@ function UI:RenderItems(items)
     row:SetPoint("TOPLEFT", 0, -y)
     row:SetPoint("TOPRIGHT", 0, -y)
     if item.divider or item.header then
+      row.spellID = nil
       row.time:Hide(); row.icon:Hide(); row.name:Hide(); row.gap:Hide(); row.res:Hide()
       row.hdr:SetFont(FONT, sz, "OUTLINE")
       row.hdr:SetText(item.label or item.header)
@@ -378,6 +387,7 @@ function UI:RenderItems(items)
       end
       row.hdr:Show()
     else
+      row.spellID = item.spellID
       row.hdr:Hide(); row.line:Hide()
       row.time:SetFont(FONT, sz); row.name:SetFont(FONT, sz)
       row.gap:SetFont(FONT, sz); row.res:SetFont(FONT, sz)
