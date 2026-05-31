@@ -1,14 +1,11 @@
 name: Release
 
-# The BigWigs packager picks the CurseForge release channel from the tag's
-# GitHub Release status:
-#   - tag pushed with no GitHub Release            -> alpha
-#   - tag with a GitHub Release marked prerelease  -> beta
-#   - tag with a full GitHub Release               -> release
-#
-# So: push a tag to ship an alpha. To promote, create a GitHub Release for
-# that tag (or edit an existing one) and re-run this workflow via the Actions
-# tab -> Run workflow.
+# The BigWigs packager picks the CurseForge release channel from the TAG NAME:
+#   - tag contains "alpha" (e.g. 0.0.1-alpha1) -> alpha
+#   - tag contains "beta"  (e.g. 0.0.1-beta1)  -> beta
+#   - anything else        (e.g. 0.0.1)        -> release (stable)
+# The packager also auto-creates a GitHub release for the tag.
+# So: iterate with x.y.z-alphaN tags, then drop the suffix to ship stable.
 on:
   push:
     tags:
